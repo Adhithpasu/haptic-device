@@ -803,7 +803,7 @@ void initializeLabels() {
   writeConLabel->setShowEnabled(false);
   screenshotLabel->setShowEnabled(false);
 
-  initializeHotkeyLabels();
+  //initializeHotkeyLabels();
 
   screenshotLabel->setText("Screenshot taken");
   writeConLabel->setText("Con file written");
@@ -890,6 +890,8 @@ void initializeHelpPanel() {
   helpPanel->setSize(520, 500);
   camera->m_frontLayer->addChild(helpPanel);
   helpPanel->setShowPanel(false);
+
+  initializeHotkeyLabels();
 
   cFontPtr headerFont = NEW_CFONT_CALIBRI_40();
   helpHeader = new cLabel(headerFont);
@@ -1000,8 +1002,8 @@ void updateLabels() {
   for (int i = 0; i < hotkeyKeys.size(); i++) {
     cLabel *tempKeyLabel = hotkeyKeys[i];
     cLabel *tempFuncLabel = hotkeyFunctions[i];
-    tempKeyLabel->setLocalPos(width - 540, height - 130 - i * 25);
-    tempFuncLabel->setLocalPos(width - 350, height - 130 - i * 25);
+    tempKeyLabel->setLocalPos(width - 530, height - 105 - i * 35);
+    tempFuncLabel->setLocalPos(width - 350, height - 105 - i * 35);
   }
 }
 
