@@ -258,10 +258,9 @@ GLFWwindow *window = NULL;
 // a handle to slider control window
 GLFWwindow *sliderWindow = NULL;
 
-// current width of window
+// current framebuffer (render) size in pixels.
+// NOTE: on HiDPI / Retina displays this is LARGER than the window size in points.
 int width = 0;
-
-// current height of window
 int height = 0;
 
 // swap interval for the display context (vertical synchronization)
@@ -352,8 +351,8 @@ void sliderWindowSizeCallback(GLFWwindow *a_window, int a_width, int a_height);
 void sliderWindowCursorPosCallback(GLFWwindow *a_window, double a_posX, double a_posY);
 void sliderWindowMouseButtonCallback(GLFWwindow *a_window, int a_button, int a_action, int a_mods);
 
-// callback when the window display is resized
-void windowSizeCallback(GLFWwindow *a_window, int a_width, int a_height);
+// callback when the framebuffer is resized (size in pixels, not window points)
+void framebufferSizeCallback(GLFWwindow *a_window, int a_width, int a_height);
 
 // callback when an error GLFW occurs
 void errorCallback(int error, const char *a_description);
@@ -526,8 +525,8 @@ int main(int argc, char *argv[]) {
   return 0; // exit
 }
 
-void windowSizeCallback(GLFWwindow *a_window, int a_width, int a_height) {
-  // update window size
+void framebufferSizeCallback(GLFWwindow *a_window, int a_width, int a_height) {
+  // update framebuffer (pixel) size used for rendering
   width = a_width;
   height = a_height;
 }
@@ -584,12 +583,13 @@ void initializeGLFW() {
     throw std::runtime_error("Failed to create slider window!");
   }
 
-  glfwGetWindowSize(window, &width, &height); // get width and height of window
+  glfwGetFramebufferSize(window, &width, &height); // framebuffer size in pixels (HiDPI-aware)
   glfwSetWindowPos(window, windowX, windowY); // set position of window
   glfwSetWindowPos(sliderWindow, windowX + windowWidth + 20, windowY);
   glfwSetKeyCallback(window, keyCallback); // set key callback
   glfwSetCursorPosCallback(window, mouseMotionCallback); // set mouse position callback
   glfwSetMouseButtonCallback(window, mouseButtonCallback); // set mouse button callback
+  glfwSetFramebufferSizeCallback(window, framebufferSizeCallback); // track render size on resize
   glfwSetWindowSizeCallback(window, windowSizeCallback); // set resize callback
   glfwSetCursorPosCallback(sliderWindow, sliderWindowCursorPosCallback);
   glfwSetMouseButtonCallback(sliderWindow, sliderWindowMouseButtonCallback);
@@ -980,13 +980,13 @@ void initializeprevPositions() {
 }
 
 void runGraphicsLoop() {
-  windowSizeCallback(window, width, height); // call window size callback at initialization
+  framebufferSizeCallback(window, width, height); // initialize framebuffer size
   cPrecisionClock keyboardModeClock;
   keyboardModeClock.reset();
   keyboardModeClock.start();
   // main graphic loop
   while (!glfwWindowShouldClose(window)) {
-    glfwGetWindowSize(window, &width, &height); // get width and height of window
+    glfwGetFramebufferSize(window, &width, &height); // framebuffer size in pixels (HiDPI-aware)
     if (!hapticDevice) {
       keyboardModeClock.stop();
       double timeInterval = cMin(getSimulationTimeStep(), keyboardModeClock.getCurrentTimeSeconds());
@@ -1166,7 +1166,7 @@ void updateGraphics(void) {
 
   // RENDER SCENE
   world->updateShadowMaps(false, false); // update shadow maps (if any)
-  camera->renderView(width, height); // render world
+  camera->renderView(width, height); // render world (width/height are framebuffer pixels)
   glFinish(); // wait until all GL commands are completed
   GLenum err = glGetError(); // check for any OpenGL errors
   if (err != GL_NO_ERROR)

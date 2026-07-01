@@ -7,6 +7,17 @@
 
 int just_unanchored = 0;
 
+// CHAI3D renders into the framebuffer, which is measured in pixels. On HiDPI /
+// Retina displays the framebuffer is larger than the window (measured in points),
+// so cursor coordinates from GLFW (window points) must be scaled up to the same
+// pixel space as width/height before being used for picking or world math.
+static void scaleCursorToPixels(double &a_x, double &a_y) {
+  float xscale, yscale;
+  glfwGetWindowContentScale(window, &xscale, &yscale);
+  a_x *= xscale;
+  a_y *= yscale;
+}
+
 void toggleFullscreen() {
   std::lock_guard<std::recursive_mutex> lock(sceneMutex);
   fullscreen = !fullscreen;
@@ -188,56 +199,89 @@ void keyCallback(GLFWwindow *a_window, int a_key, int a_scancode, int a_action,
 }
 
 void mouseMotionCallback(GLFWwindow *a_window, double a_posX, double a_posY) {
-  std::lock_guard<std::recursive_mutex> lock(sceneMutex);
-  if ((selectedAtom != NULL) && (mouseState == MOUSE_SELECTION) &&
-      (selectedAtom->isAnchor())) {
-    cVector3d vCameraObject = selectedPoint - camera->getLocalPos();
-    cVector3d vCameraLookAt = camera->getLookVector();
-    double angle = cAngle(vCameraObject, vCameraLookAt);
-    double distanceToObjectPlane = vCameraObject.length() * cos(angle);
-    double factor = (distanceToObjectPlane * tan(0.5 *
-                    camera->getFieldViewAngleRad())) / (0.5 * height);
-    double posRelX = factor * (a_posX - (0.5 * width));
-    double posRelY = factor * ((height - a_posY) - (0.5 * height));
-    cVector3d pos = camera->getLocalPos() +
-    distanceToObjectPlane * camera->getLookVector() +
-    posRelX * camera->getRightVector() +
-    posRelY * camera->getUpVector();
-    cVector3d posObject = pos - selectedAtomOffset;
-    selectedAtom->setLocalPos(posObject);
-  }
+    std::lock_guard<std::recursive_mutex> lock(sceneMutex);
+    if ((selectedAtom != NULL) && (mouseState == MOUSE_SELECTION) &&
+        (selectedAtom->isAnchor())) {
+        // get the vector that goes from the camera to the selected point (mouse
+        // click)
+        cVector3d vCameraObject = selectedPoint - camera->getLocalPos();
+
+        // get the vector that point in the direction of the camera. ("where the
+        // camera is looking at")
+        cVector3d vCameraLookAt = camera->getLookVector();
+
+        // compute the angle between both vectors
+        double angle = cAngle(vCameraObject, vCameraLookAt);
+
+        // compute the distance between the camera and the plane that intersects the
+        // object and which is parallel to the camera plane
+        double distanceToObjectPlane = vCameraObject.length() * cos(angle);
+
+        // cursor is in window points; scale to framebuffer pixels to match width/height
+        double posX = a_posX, posY = a_posY;
+        scaleCursorToPixels(posX, posY);
+
+        // convert the pixel in mouse space into a relative position in the world
+        double factor = (distanceToObjectPlane * tan(0.5 *
+                        camera->getFieldViewAngleRad())) / (0.5 * height);
+        double posRelX = factor * (posX - (0.5 * width));
+        double posRelY = factor * ((height - posY) - (0.5 * height));
+
+        // compute the new position in world coordinates
+        cVector3d pos = camera->getLocalPos() +
+        distanceToObjectPlane * camera->getLookVector() +
+        posRelX * camera->getRightVector() +
+        posRelY * camera->getUpVector();
+
+        // compute position of object by taking in account offset
+        cVector3d posObject = pos - selectedAtomOffset;
+
+        // apply new position to object
+        selectedAtom->setLocalPos(posObject);
+    }
 }
 
 void mouseButtonCallback(GLFWwindow *a_window, int a_button, int a_action,
                          int a_mods) {
-  std::lock_guard<std::recursive_mutex> lock(sceneMutex);
-  double x, y;
-  cCollisionRecorder recorder;
-  cCollisionSettings settings;
-  if (a_button == GLFW_MOUSE_BUTTON_LEFT && a_action == GLFW_PRESS) {
-    glfwGetCursorPos(window, &x, &y);
-    bool hit = camera->selectWorld(x, (height - y), width, height, recorder, settings);
-    if (hit) {
-      cGenericObject *selected = recorder.m_nearestCollision.m_object;
-      selectedAtom = (Atom *)selected;
-      selectedPoint = recorder.m_nearestCollision.m_globalPos;
-      selectedAtomOffset = recorder.m_nearestCollision.m_globalPos - selectedAtom->getLocalPos();
-      mouseState = MOUSE_SELECTION;
+    std::lock_guard<std::recursive_mutex> lock(sceneMutex);
+    // store mouse position
+    double x, y;
+
+    // detect for any collision between mouse and scene
+    cCollisionRecorder recorder;
+    cCollisionSettings settings;
+    if (a_button == GLFW_MOUSE_BUTTON_LEFT && a_action == GLFW_PRESS) {
+        glfwGetCursorPos(window, &x, &y);
+        scaleCursorToPixels(x, y); // window points -> framebuffer pixels
+        bool hit =
+        camera->selectWorld(x, (height - y), width, height, recorder, settings);
+        if (hit) {
+            cGenericObject *selected = recorder.m_nearestCollision.m_object;
+            selectedAtom = (Atom *)selected;
+            selectedPoint = recorder.m_nearestCollision.m_globalPos;
+            selectedAtomOffset =
+            recorder.m_nearestCollision.m_globalPos - selectedAtom->getLocalPos();
+            mouseState = MOUSE_SELECTION;
+        }
+    } else if (a_button == GLFW_MOUSE_BUTTON_RIGHT && a_action == GLFW_PRESS) {
+        glfwGetCursorPos(window, &x, &y);
+        scaleCursorToPixels(x, y); // window points -> framebuffer pixels
+        bool hit =
+        camera->selectWorld(x, (height - y), width, height, recorder, settings);
+        if (hit) {
+            // retrieve Atom selected by mouse
+            cGenericObject *selected = recorder.m_nearestCollision.m_object;
+            selectedAtom = (Atom *)selected;
+
+            // Toggle anchor status and color
+            if (selectedAtom->isAnchor()) {
+                selectedAtom->setAnchor(false);
+            } else if (!selectedAtom->isCurrent()) {  // cannot set current to anchor
+                selectedAtom->setAnchor(true);
+            }
+            mouseState = MOUSE_SELECTION;
+        }
+    } else {
+        mouseState = MOUSE_IDLE;
     }
-  } else if (a_button == GLFW_MOUSE_BUTTON_RIGHT && a_action == GLFW_PRESS) {
-    glfwGetCursorPos(window, &x, &y);
-    bool hit = camera->selectWorld(x, (height - y), width, height, recorder, settings);
-    if (hit) {
-      cGenericObject *selected = recorder.m_nearestCollision.m_object;
-      selectedAtom = (Atom *)selected;
-      if (selectedAtom->isAnchor()) {
-        selectedAtom->setAnchor(false);
-      } else if (!selectedAtom->isCurrent()) {
-        selectedAtom->setAnchor(true);
-      }
-      mouseState = MOUSE_SELECTION;
-    }
-  } else {
-    mouseState = MOUSE_IDLE;
-  }
 }
