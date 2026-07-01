@@ -212,7 +212,7 @@ cLabel *scope_upper;
 cLabel *scope_lower;
 
 // a flag that indicates if the haptic simulation is currently running
-bool simulationRunning = false;
+std::atomic<bool> simulationRunning{false};
 
 // a flag that indicates if the haptic simulation has terminated
 bool simulationFinished = true;
@@ -238,6 +238,9 @@ int width = 0;
 // current height of window
 int height = 0;
 
+// radius of the camera
+double rho = .35; 
+
 // a scope to monitor the potential energy
 cScope *scope;
 
@@ -254,18 +257,27 @@ cVector3d selectedAtomOffset;
 // position of mouse click.
 cVector3d selectedPoint;
 
+// save coordinates of central atom
+double centerCoords[3] = {50.0, 50.0, 50.0}; 
+
+// swap interval for the display context (vertical synchronization)
+
+int swapInterval = 1;
 
 std::atomic<bool> freezeAtoms(false); // determine if atoms should be frozen
+std::atomic<int> screenshotCounter(-2); // keep track of how long screenshot label has been displayed
+std::atomic<int> writeConCounter(-2);  // keep track of how long write to con label has been displayed
 LocalPotential energySurface = LENNARD_JONES; // default potential is Lennard Jones
 bool global_min_known = true; // check if able to read in the global min
 cPanel *helpPanel; // panel that displays hotkeys
 cLabel *helpHeader; // help panel header
 
-
+std::atomic<double> displayedPotentialEnergy(0.0);
 std::recursive_mutex sceneMutex;
 std::atomic<bool> hapticsThreadStarted(false);
 int currentIndex = 0;
-
+vector<cLabel *> hotkeyKeys; // vector holding hotkey key labels
+vector<cLabel *> hotkeyFunctions; // vector holding function key labels (must be separate for formatting)
 // screenshot notification label
 cLabel *screenshotLabel;
 
@@ -421,7 +433,10 @@ int main(int argc, char *argv[]) {
   // HAPTIC DEVICE
   initializeHapticDevice();
   
-  string hapticModeStr = argv[1];
+  if (argc < 2) {
+    throw std::runtime_error("Missing haptic mode argument");
+  }
+  string hapticModeStr = argv[1];  
   if (hapticModeStr == "force" || hapticModeStr == "f") {
     hapticMode = HapticMode::Force;
   } else if (hapticModeStr == "position" || hapticModeStr == "p") {
@@ -518,8 +533,7 @@ void initializeGLFW() {
     glfwTerminate();
     throw std::runtime_error("Failed to create window!");
   }
-  // swap interval for the display context (vertical synchronization)
-  int swapInterval = 1;
+
   glfwGetWindowSize(window, &width, &height); // get width and height of window
   glfwSetWindowPos(window, windowX, windowY); // set position of window
   glfwSetKeyCallback(window, keyCallback); // set key callback
@@ -562,9 +576,7 @@ void initializeCamera() {
   camera->setSphericalReferences(origin, zenith, azimuth);
 
   // sets the camera's position to have a radius of .1, located at 0 radians (vertically and horizontally)
-  double rho = .35; // radius of the camera
   camera->setSphericalRad(rho, 0, 0);
-
   // set the near and far clipping planes of the camera anything in front or behind these clipping
   // planes will not be rendered
   camera->setClippingPlanes(0.01, 10.0);
@@ -661,7 +673,6 @@ void placeAtoms(std::array<double, 9> aseCell, std::array<int, 3> asePbc, int ar
     aseCell = structure.cell;
     asePbc = structure.pbc;
     const int nAtoms = static_cast<int>(positions.size());
-    double centerCoords[3] = {50.0, 50.0, 50.0}; // save coordinates of central atom
 
     for (int i = 0; i < nAtoms; i++) {
       Atom *newAtom = initializeAtom(texture, startingAtomicNrs[i]); // Create atom pointer
@@ -677,10 +688,17 @@ void placeAtoms(std::array<double, 9> aseCell, std::array<int, 3> asePbc, int ar
       } else {
         // newAtom->setAnchor(true); // Anchor by default
         // scale coordinates and insert
-        newAtom->setLocalPos(
-            0.02 * (positions[i][0] - centerCoords[0]), // position offset -- should probably disappear once we get boxes working
-            0.02 * (positions[i][1] - centerCoords[1]),
-            0.02 * (positions[i][2] - centerCoords[2]));
+        if (hapticMode == HapticMode::Standby) {
+          newAtom->setLocalPos(
+              0.02 * (positions[i][0] - centerCoords[0]) + 1, // position offset -- should probably disappear once we get boxes working
+              0.02 * (positions[i][1] - centerCoords[1]),
+              0.02 * (positions[i][2] - centerCoords[2]));
+        } else {
+          newAtom->setLocalPos(
+              0.02 * (positions[i][0] - centerCoords[0]), // position offset -- should probably disappear once we get boxes working
+              0.02 * (positions[i][1] - centerCoords[1]),
+              0.02 * (positions[i][2] - centerCoords[2]));
+        }
       }
     }
   }
@@ -738,6 +756,11 @@ void initializeAtomPosition(Atom *new_atom) {
 
 void initializeCalculator(int argc, char *argv[], std::array<double, 9> aseCell,
     std::array<int, 3> asePbc) {
+    if (argc < 4) {
+      energySurface = LENNARD_JONES;
+      calculatorPtr = new ljCalculator();
+      return;
+    }
     string potential = argv[3];
     for (char &c : potential) {
       c = tolower(c);
@@ -973,17 +996,11 @@ void updateLabels() {
   string trueFalse = freezeAtoms.load() ? "true" : "false";
   isFrozen->setText("Freeze simulation: " + trueFalse);
   isFrozen->setLocalPos((width - isFrozen->getWidth()) - 5, 15);
-  // keep track of how long screenshot label has been displayed
-  std::atomic<int> screenshotCounter(-2);
   screenshotLabel->setLocalPos(5, height - 20);
   updateCounters(screenshotLabel, screenshotCounter);
 
   writeConLabel->setLocalPos(5, height - 40);
-  // keep track of how long write to con label has been displayed
-  std::atomic<int> writeConCounter(-2);
   updateCounters(writeConLabel, writeConCounter);
-  vector<cLabel *> hotkeyKeys; // vector holding hotkey key labels
-  vector<cLabel *> hotkeyFunctions; // vector holding function key labels (must be separate for formatting)
   for (int i = 0; i < hotkeyKeys.size(); i++) {
     cLabel *tempKeyLabel = hotkeyKeys[i];
     cLabel *tempFuncLabel = hotkeyFunctions[i];
@@ -994,7 +1011,6 @@ void updateLabels() {
 
 void updateGraphics(void) {
   std::lock_guard<std::recursive_mutex> lock(sceneMutex);
-  std::atomic<double> displayedPotentialEnergy(0.0);
   std::atomic<int> displayedAnchoredCount(0);
   // UPDATE WIDGETS
   updateLabels();
@@ -1053,15 +1069,15 @@ void switchCamera() {
 }
 
 void switchCurrentAtom() {
+  if (spheres.empty()) return;
+  currentIndex %= spheres.size();
   Atom* current = spheres[currentIndex];
   int prev_curr_atom = currentIndex;
-  currentIndex = remainder(currentIndex + 1, spheres.size());
-  if (currentIndex < 0)
+  currentIndex = (currentIndex + 1) % spheres.size();  if (currentIndex < 0)
     currentIndex += spheres.size();
   int startAtom = currentIndex;
   while (spheres[currentIndex]->isAnchor()) {
-    currentIndex = remainder(currentIndex + 1, spheres.size());
-    if (currentIndex < 0)
+    currentIndex = (currentIndex + 1) % spheres.size();    if (currentIndex < 0)
       currentIndex += spheres.size();
     if (currentIndex == startAtom)
       break;
@@ -1172,7 +1188,7 @@ cVector3d standbyModeUpdate(Atom *current, cVector3d position, const double time
     prevHapticInitialized = true;
     prevHapticPosition = position;
   }
-  const int REST_ERR = .001;
+  const double REST_ERR = .001;
   if (simulating && current->getForce().length() >= REST_ERR) {
     prevForces[prevForcesIndex] = current->getForce();
     prevForcesIndex++;
@@ -1190,6 +1206,7 @@ cVector3d standbyModeUpdate(Atom *current, cVector3d position, const double time
 
   const double STANDBY_ERR = .1; // movement err acceptable for standby mode to activate
   const double HAPTIC_RADIUS = .08; // "escape" radius to get out of simulating mode
+
 
   if (simulating) {  
     if (position.length() < HAPTIC_RADIUS) {
@@ -1246,6 +1263,7 @@ cVector3d standbyModeUpdate(Atom *current, cVector3d position, const double time
           prevPositions[currentIndex] = current->getLocalPos();
           finalErr = position.length();
         }
+        
         return cVector3d(0,0,0);
       }
     }
@@ -1276,6 +1294,9 @@ cVector3d positionModeUpdate(Atom *current, cVector3d position, const double tim
 
 cVector3d stepSimulation(const cVector3d &requestedPosition, const double timeInterval,
                         const bool hasHapticDevice) {
+  if (prevPositions.size() != spheres.size()) {
+    prevPositions.resize(spheres.size());
+  }
   std::lock_guard<std::recursive_mutex> lock(sceneMutex);
   if (spheres.empty()) {
     return cVector3d(0.0, 0.0, 0.0);
@@ -1341,7 +1362,9 @@ void updateHaptics(void) {
   // simulation in now running
   simulationRunning = true;
   simulationFinished = false;
-
+  if (!hapticDevice) {
+    return;
+  }
   // open a connection to haptic device
   hapticDevice->open();
 
