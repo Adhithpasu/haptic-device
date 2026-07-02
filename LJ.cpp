@@ -912,6 +912,7 @@ void initializePotentialEnergyPlot() {
   camera->m_frontLayer->addChild(scope);
   scope->setSignalEnabled(true, true, false, false);
   scope->setTransparencyLevel(.7);
+  scope->setShowEnabled(false);
   global_minimum = getGlobalMinima(spheres.size());
   double lower_bound, upper_bound;
   if (global_minimum != 0 && (energySurface == LENNARD_JONES)) {
@@ -1038,19 +1039,26 @@ void updateCounters(cLabel *label, std::atomic<int> &counter) {
 }
 
 void updateLabels() {
+  const bool debugVisible = showDebug;
+
   labelRates->setText(cStr(freqCounterGraphics.getFrequency(), 0) + " Hz / " +
                       cStr(freqCounterHaptics.getFrequency(), 0) + " Hz");
   labelRates->setLocalPos((int)(0.5 * (width - labelRates->getWidth())), 15);
+  labelRates->setShowEnabled(debugVisible);
+
   double x = hapticPosition.get(0);
   double y = hapticPosition.get(1);
   double z = hapticPosition.get(2);
   hapticPositionLabel->setText("Position: " + cStr(x, 2) + ", " + cStr(y, 2) + ", " + cStr(z, 2));
+  hapticPositionLabel->setShowEnabled(debugVisible);
 
   updateCameraLabel(camera_pos, camera);
+  camera_pos->setShowEnabled(debugVisible);
 
   string trueFalse = freezeAtoms.load() ? "true" : "false";
   isFrozen->setText("Freeze simulation: " + trueFalse);
   isFrozen->setLocalPos((width - isFrozen->getWidth()) - 5, 15);
+  isFrozen->setShowEnabled(debugVisible);
 
   screenshotLabel->setLocalPos(5, height - 20);
   updateCounters(screenshotLabel, screenshotCounter);
@@ -1142,9 +1150,11 @@ void updateGraphics(void) {
   helpPanel->setLocalPos(width - 550, height - 600);
   helpHeader->setLocalPos(width - 490, height - 70);
   
+  const bool debugVisible = showDebug;
   const double potentialEnergy = displayedPotentialEnergy.load();
   LJ_num->setText("Potential Energy: " + cStr(potentialEnergy, 5));
   LJ_num->setLocalPos(0, 15, 0);
+  LJ_num->setShowEnabled(debugVisible);
 
   int anchoredCount = 0;
   for (int i = 0; i < spheres.size(); i++) {
@@ -1153,6 +1163,11 @@ void updateGraphics(void) {
   num_anchored->setText(to_string(anchoredCount) + " anchored / " +
                         to_string(spheres.size()) + " total");
   num_anchored->setLocalPos((width - num_anchored->getWidth()) - 5, 0);
+  num_anchored->setShowEnabled(debugVisible);
+
+  scope->setShowEnabled(debugVisible);
+  scope_upper->setShowEnabled(debugVisible);
+  scope_lower->setShowEnabled(debugVisible);
 
   scope->setSignalValues(potentialEnergy, global_minimum);
   if (!global_min_known && global_minimum < scope->getRangeMin()) {
