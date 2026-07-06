@@ -299,7 +299,7 @@ void initializeLight();
 void initializeHapticDevice();
 
 void placeAtoms(std::array<double, 9> aseCell, std::array<int, 3> asePbc, int argc, char *argv[]);
-Atom* initializeAtom(cTexture2dPtr texture, int atomicNumber);
+Atom* initializeAtom(cTexture2dPtr texture, int atomicNumber, double radius);
 void initializeAtomPosition(Atom *new_atom);
 void initializeCalculator(int argc, char *argv[], std::array<double, 9> aseCell,
     std::array<int, 3> asePbc);
@@ -654,7 +654,7 @@ void placeAtoms(std::array<double, 9> aseCell, std::array<int, 3> asePbc, int ar
     int numSpheres = argc > 2 ? atoi(argv[2]) : 5;
     for (int i = 0; i < numSpheres; i++) {
       // initialize atom with texture and atomic number of 1 (hydrogen)
-      Atom *new_atom = initializeAtom(texture, 1); 
+      Atom *new_atom = initializeAtom(texture, 1, SPHERE_RADIUS); 
       if (i == 0) {
         new_atom->setCurrent(true); // set the first sphere to the current
       } else {
@@ -671,12 +671,13 @@ void placeAtoms(std::array<double, 9> aseCell, std::array<int, 3> asePbc, int ar
     }
     const std::vector<std::array<double, 3>> &positions = structure.positions;
     const std::vector<int> &startingAtomicNrs = structure.atomicNumbers;
+    const std::vector<double> &startingRadii = structure.radii;
     aseCell = structure.cell;
     asePbc = structure.pbc;
     const int nAtoms = static_cast<int>(positions.size());
 
     for (int i = 0; i < nAtoms; i++) {
-      Atom *newAtom = initializeAtom(texture, startingAtomicNrs[i]); // Create atom pointer
+      Atom *newAtom = initializeAtom(texture, startingAtomicNrs[i], startingRadii[i] * 0.02); // Create atom pointer
       // Set the positions of all atoms
       if (i == 0) {
         // make very first atom the current atom
@@ -709,8 +710,8 @@ void placeAtoms(std::array<double, 9> aseCell, std::array<int, 3> asePbc, int ar
   }
 }
 
-Atom* initializeAtom(cTexture2dPtr texture, int atomicNumber) {
-  Atom *new_atom = new Atom(SPHERE_RADIUS, atomicNumber); // create a atom and define its radius
+Atom* initializeAtom(cTexture2dPtr texture, int atomicNumber, double radius = SPHERE_RADIUS) {
+  Atom *new_atom = new Atom(radius, atomicNumber); // create a atom and define its radius
   spheres.push_back(new_atom); // store pointer to atom
   world->addChild(new_atom); // add atom to world
   world->addChild(new_atom->getVelVector()); // add line to world
